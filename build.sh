@@ -33,13 +33,28 @@ OS="${1:-$(host_os)}"
 ARCH="${2:-$(host_arch)}"
 
 # pip resolves wheels for the RUNNER's platform (PyYAML/cryptography/cffi ship native
-# wheels), so a target must be built on a matching machine. Refuse a mismatched local
-# build unless explicitly forced.
-if { [ "$OS" != "$(host_os)" ] || [ "$ARCH" != "$(host_arch)" ]; } && [ "${ALLOW_CROSS:-0}" != "1" ]; then
-  echo "ERROR: requested ${OS}/${ARCH} but host is $(host_os)/$(host_arch)." >&2
-  echo "       pip would install wheels for the host, producing a broken bundle." >&2
-  echo "       Build each target on a matching runner (see .github/workflows/build.yml)." >&2
-  exit 1
+# wheels), so a target normally must be built on a matching machine. One exception:
+# darwin/amd64 can be built on an Apple-silicon host via Rosetta 2 — we run the x86_64
+# interpreter under `arch -x86_64`, so pip installs genuine x86_64 wheels. PYRUN holds the
+# prefix used for every interpreter invocation (empty for a native build).
+HOST_OS="$(host_os)"
+HOST_ARCH="$(host_arch)"
+PYRUN=()
+if [ "$OS" != "$HOST_OS" ] || [ "$ARCH" != "$HOST_ARCH" ]; then
+  if [ "$OS" = "darwin" ] && [ "$ARCH" = "amd64" ] && [ "$HOST_OS" = "darwin" ] && [ "$HOST_ARCH" = "arm64" ]; then
+    if ! arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
+      echo "ERROR: building darwin/amd64 on arm needs Rosetta 2." >&2
+      echo "       Install it: softwareupdate --install-rosetta --agree-to-license" >&2
+      exit 1
+    fi
+    PYRUN=(arch -x86_64)
+    echo ">> Cross-building darwin/amd64 on arm via Rosetta 2"
+  elif [ "${ALLOW_CROSS:-0}" != "1" ]; then
+    echo "ERROR: requested ${OS}/${ARCH} but host is ${HOST_OS}/${HOST_ARCH}." >&2
+    echo "       pip would install wheels for the host, producing a broken bundle." >&2
+    echo "       Build each target on a matching runner (see .github/workflows/build.yml)." >&2
+    exit 1
+  fi
 fi
 
 # ----- map (os, arch) -> python-build-standalone triple -----------------------
@@ -78,13 +93,13 @@ PY="${BUNDLE_DIR}/python/bin/python3"
 
 # ----- install ansible-core into the python tree ------------------------------
 echo ">> Upgrading pip"
-"$PY" -m pip install --no-input --disable-pip-version-check --upgrade pip >/dev/null
+${PYRUN[@]+"${PYRUN[@]}"} "$PY" -m pip install --no-input --disable-pip-version-check --upgrade pip >/dev/null
 echo ">> Installing ansible-core==${ANSIBLE_CORE_VERSION}"
-"$PY" -m pip install --no-input --disable-pip-version-check "ansible-core==${ANSIBLE_CORE_VERSION}"
+${PYRUN[@]+"${PYRUN[@]}"} "$PY" -m pip install --no-input --disable-pip-version-check "ansible-core==${ANSIBLE_CORE_VERSION}"
 
 # ----- bake Galaxy collections ------------------------------------------------
 echo ">> Installing collections from requirements.yml -> ${BUNDLE_DIR}/collections"
-"$PY" "${BUNDLE_DIR}/python/bin/ansible-galaxy" collection install \
+${PYRUN[@]+"${PYRUN[@]}"} "$PY" "${BUNDLE_DIR}/python/bin/ansible-galaxy" collection install \
   -r requirements.yml -p "${BUNDLE_DIR}/collections"
 
 # ----- package ----------------------------------------------------------------

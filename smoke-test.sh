@@ -23,6 +23,19 @@ if [ -z "$TARBALL" ] || [ ! -f "$TARBALL" ]; then
 fi
 TARBALL="$(cd "$(dirname "$TARBALL")" && pwd)/$(basename "$TARBALL")"
 
+# Derive the bundle's target os/arch from the filename (…-<os>-<arch>.tar.gz). If the bundle
+# is darwin/amd64 but we're on Apple silicon, run its interpreter under Rosetta 2. PYRUN
+# holds that prefix (empty for a native run).
+base="$(basename "$TARBALL")"; base="${base%.tar.gz}"
+B_ARCH="${base##*-}"; rest="${base%-*}"; B_OS="${rest##*-}"
+host_os() { case "$(uname -s)" in Linux) echo linux ;; Darwin) echo darwin ;; *) echo unknown ;; esac; }
+host_arch() { case "$(uname -m)" in x86_64|amd64) echo amd64 ;; arm64|aarch64) echo arm64 ;; *) echo unknown ;; esac; }
+PYRUN=()
+if [ "$B_OS" = "darwin" ] && [ "$B_ARCH" = "amd64" ] && [ "$(host_os)" = "darwin" ] && [ "$(host_arch)" = "arm64" ]; then
+  PYRUN=(arch -x86_64)
+  echo ">> Testing darwin/amd64 bundle on arm via Rosetta 2"
+fi
+
 RELOC="$(mktemp -d "${TMPDIR:-/tmp}/ansible-portable-reloc.XXXXXX")"
 cleanup() { rm -rf "$RELOC"; }
 trap cleanup EXIT
@@ -50,11 +63,11 @@ fi
 
 echo
 echo "== 1. ansible-playbook --version (relocated) =="
-"$PY" "$AP" --version
+${PYRUN[@]+"${PYRUN[@]}"} "$PY" "$AP" --version
 
 echo
 echo "== 2. baked collections =="
-"$PY" "$AG" collection list 2>/dev/null | tee "${RELOC}/collections.txt"
+${PYRUN[@]+"${PYRUN[@]}"} "$PY" "$AG" collection list 2>/dev/null | tee "${RELOC}/collections.txt"
 if ! grep -qi 'ansible.posix' "${RELOC}/collections.txt"; then
   echo "FAIL: ansible.posix not found in the relocated bundle" >&2
   exit 1
@@ -62,7 +75,7 @@ fi
 
 echo
 echo "== 3. execute localhost play =="
-"$PY" "$AP" -i "${SCRIPT_DIR}/test/inventory.ini" "${SCRIPT_DIR}/test/ping.yml"
+${PYRUN[@]+"${PYRUN[@]}"} "$PY" "$AP" -i "${SCRIPT_DIR}/test/inventory.ini" "${SCRIPT_DIR}/test/ping.yml"
 
 echo
 echo "PASS: bundle is self-contained after relocation."

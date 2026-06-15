@@ -26,9 +26,11 @@ jobs:
           - os: darwin
             arch: arm64
             runner: macos-14
+          # darwin/amd64 is cross-built on the arm runner via Rosetta 2 (macos-14 ships it),
+          # avoiding the scarce/slow Intel macos-13 runners.
           - os: darwin
             arch: amd64
-            runner: macos-13
+            runner: macos-14
     steps:
       - name: Checkout
         uses: actions/checkout@v4
