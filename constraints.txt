@@ -1,0 +1,8 @@
+# pip constraints applied to every bundle build.
+#
+# cryptography 49.0.0 dropped prebuilt x86_64/universal2 macOS wheels (arm64-only), so
+# pip would fall back to compiling it from source — which needs a Rust + OpenSSL toolchain
+# and breaks the "download-only, fully reproducible" guarantee (and fails on CI runners
+# without OpenSSL). 48.0.1 is the last release shipping a macOS universal2 wheel and has
+# wheels for every target we build. Pin it so all platforms install the same binary.
+cryptography==48.0.1

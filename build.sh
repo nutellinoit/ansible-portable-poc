@@ -95,7 +95,11 @@ PY="${BUNDLE_DIR}/python/bin/python3"
 echo ">> Upgrading pip"
 ${PYRUN[@]+"${PYRUN[@]}"} "$PY" -m pip install --no-input --disable-pip-version-check --upgrade pip >/dev/null
 echo ">> Installing ansible-core==${ANSIBLE_CORE_VERSION}"
-${PYRUN[@]+"${PYRUN[@]}"} "$PY" -m pip install --no-input --disable-pip-version-check "ansible-core==${ANSIBLE_CORE_VERSION}"
+# --only-binary=:all: forbids source builds: a missing wheel fails loudly instead of
+# silently compiling (which would need a host toolchain and break reproducibility).
+# constraints.txt pins deps (e.g. cryptography) to versions that ship wheels everywhere.
+${PYRUN[@]+"${PYRUN[@]}"} "$PY" -m pip install --no-input --disable-pip-version-check \
+  --only-binary=:all: -c constraints.txt "ansible-core==${ANSIBLE_CORE_VERSION}"
 
 # ----- bake Galaxy collections ------------------------------------------------
 echo ">> Installing collections from requirements.yml -> ${BUNDLE_DIR}/collections"
