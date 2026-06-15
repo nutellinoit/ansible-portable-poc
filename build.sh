@@ -107,8 +107,10 @@ ${PYRUN[@]+"${PYRUN[@]}"} "$PY" "${BUNDLE_DIR}/python/bin/ansible-galaxy" collec
   -r requirements.yml -p "${BUNDLE_DIR}/collections"
 
 # ----- package ----------------------------------------------------------------
-echo ">> Creating ${TARBALL}"
-tar -czf "$TARBALL" -C "$BUNDLE_DIR" .
+# Pipe through `gzip -9` (max compression) instead of `tar -z` (level 6). Portable across
+# macOS bsdtar and GNU tar.
+echo ">> Creating ${TARBALL} (gzip -9)"
+tar -cf - -C "$BUNDLE_DIR" . | gzip -9 > "$TARBALL"
 
 echo ">> Computing checksum"
 if command -v sha256sum >/dev/null 2>&1; then

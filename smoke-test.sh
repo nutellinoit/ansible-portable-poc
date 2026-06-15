@@ -68,10 +68,12 @@ ${PYRUN[@]+"${PYRUN[@]}"} "$PY" "$AP" --version
 echo
 echo "== 2. baked collections =="
 ${PYRUN[@]+"${PYRUN[@]}"} "$PY" "$AG" collection list 2>/dev/null | tee "${RELOC}/collections.txt"
-if ! grep -qi 'ansible.posix' "${RELOC}/collections.txt"; then
-  echo "FAIL: ansible.posix not found in the relocated bundle" >&2
-  exit 1
-fi
+for coll in ansible.posix community.general; do
+  if ! grep -qi "$coll" "${RELOC}/collections.txt"; then
+    echo "FAIL: ${coll} not found in the relocated bundle" >&2
+    exit 1
+  fi
+done
 
 echo
 echo "== 3. execute localhost play =="

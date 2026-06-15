@@ -4,3 +4,8 @@
 collections:
   - name: ansible.posix
     version: "2.2.0"
+  # community.general: needed by installer-on-premises for the `modprobe` (kube-node-common)
+  # and `ini_file` (containerd) modules. Large collection for only two uses — kept whole for
+  # correctness; revisit if we replace those two tasks upstream.
+  - name: community.general
+    version: "13.0.1"
