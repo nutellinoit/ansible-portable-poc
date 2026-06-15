@@ -1,0 +1,13 @@
+---
+# Minimal, non-mutating play to prove the portable bundle actually executes Ansible
+# against a target (localhost via the local connection) using only its own interpreter.
+- name: Portable bundle smoke test
+  hosts: local
+  gather_facts: false
+  tasks:
+    - name: Ping (ansible.builtin)
+      ansible.builtin.ping:
+
+    - name: Show the interpreter Ansible is running on
+      ansible.builtin.debug:
+        msg: "controller python: {{ ansible_playbook_python }}"

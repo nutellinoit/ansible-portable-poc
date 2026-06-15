@@ -1,0 +1,6 @@
+---
+# Ansible Galaxy collections baked into the portable bundle at build time.
+# Today the SIGHUP on-premises playbooks only need ansible.posix beyond ansible.builtin.
+collections:
+  - name: ansible.posix
+    version: "2.2.0"

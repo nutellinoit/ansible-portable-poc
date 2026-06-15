@@ -1,0 +1,4 @@
+# Build outputs
+/dist/
+*.tar.gz
+*.tar.gz.sha256

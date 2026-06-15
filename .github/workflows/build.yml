@@ -1,0 +1,79 @@
+name: Build portable Ansible bundle
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - os: darwin
+            arch: arm64
+            runner: macos-14
+          - os: darwin
+            arch: amd64
+            runner: macos-13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build bundle
+        run: ./build.sh ${{ matrix.os }} ${{ matrix.arch }}
+
+      - name: Locate tarball
+        id: tarball
+        run: echo "name=$(ls ansible-portable-*-${{ matrix.os }}-${{ matrix.arch }}.tar.gz)" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test (relocated)
+        run: ./smoke-test.sh "${{ steps.tarball.outputs.name }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ansible-portable-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            ansible-portable-*-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+            ansible-portable-*-${{ matrix.os }}-${{ matrix.arch }}.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Aggregate checksums
+        working-directory: artifacts
+        run: |
+          cat *.tar.gz.sha256 > SHA256SUMS
+          echo "=== SHA256SUMS ==="
+          cat SHA256SUMS
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*.tar.gz
+            artifacts/SHA256SUMS
