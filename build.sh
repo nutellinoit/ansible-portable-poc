@@ -122,6 +122,31 @@ ${PYRUN[@]+"${PYRUN[@]}"} "$PY" "${BUNDLE_DIR}/python/bin/ansible-galaxy" collec
 # -h/--dereference resolves symlinks into real files: consumers that extract the tarball
 # without preserving symlinks (e.g. furyctl's go-getter/cache copy) would otherwise turn the
 # python interpreter symlinks (python3 -> python3.12, ...) into empty files and break it.
+#
+# Safety: dereferencing would bake EXTERNAL file contents into the tarball if any symlink
+# escapes the bundle (absolute target or path traversal). Refuse to package in that case.
+bundle_abs="$(cd "$BUNDLE_DIR" && pwd)"
+while IFS= read -r link; do
+  target="$(readlink "$link")"
+
+  case "$target" in
+    /*)
+      echo "ERROR: absolute symlink in bundle, refusing to dereference: ${link} -> ${target}" >&2
+      exit 1
+      ;;
+  esac
+
+  resolved_dir="$(cd "$(dirname "$link")" && cd "$(dirname "$target")" 2>/dev/null && pwd || true)"
+
+  case "${resolved_dir}/" in
+    "${bundle_abs}"/*) : ;; # resolves inside the bundle, safe
+    *)
+      echo "ERROR: symlink escapes bundle, refusing to dereference: ${link} -> ${target}" >&2
+      exit 1
+      ;;
+  esac
+done < <(find "$BUNDLE_DIR" -type l)
+
 echo ">> Creating ${TARBALL} (gzip -9, dereferencing symlinks)"
 tar -ch -f - -C "$BUNDLE_DIR" . | gzip -9 > "$TARBALL"
 
