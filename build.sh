@@ -9,7 +9,12 @@
 #
 # Output:
 #   dist/<os>-<arch>/                        (the unpacked bundle: python/ + collections/)
-#   ansible-portable-<ansible_version>-<os>-<arch>.tar.gz   (+ .sha256)
+#   ansible-portable-<bundle_version>-<os>-<arch>.tar.gz   (+ .sha256)
+#
+# The tarball is named by the BUNDLE release version (our own versioning), NOT by the
+# ansible-core version — so we can rebuild the bundle (e.g. change a collection) keeping the
+# same ansible-core but bumping the release. BUNDLE_VERSION comes from the env (CI passes the
+# git tag via github.ref_name); locally it falls back to `git describe`.
 #
 # The bundle contains a relocatable CPython (python-build-standalone) with ansible-core
 # pip-installed directly into its tree (no venv → no absolute paths in pyvenv.cfg) plus
@@ -69,10 +74,15 @@ esac
 PBS_ASSET="cpython-${PYTHON_VERSION}+${PBS_RELEASE}-${TRIPLE}-install_only.tar.gz"
 PBS_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/${PBS_ASSET}"
 
+# Release version of the bundle (our own versioning), used for the tarball name.
+# Precedence: env BUNDLE_VERSION (CI sets it to github.ref_name) -> git describe -> "dev".
+BUNDLE_VERSION="${BUNDLE_VERSION:-$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)}"
+
 BUNDLE_DIR="dist/${OS}-${ARCH}"
-TARBALL="ansible-portable-${ANSIBLE_CORE_VERSION}-${OS}-${ARCH}.tar.gz"
+TARBALL="ansible-portable-${BUNDLE_VERSION}-${OS}-${ARCH}.tar.gz"
 
 echo ">> Target:            ${OS}/${ARCH} (${TRIPLE})"
+echo ">> Bundle version:    ${BUNDLE_VERSION}"
 echo ">> CPython:           ${PYTHON_VERSION} (pbs ${PBS_RELEASE})"
 echo ">> ansible-core:      ${ANSIBLE_CORE_VERSION}"
 echo ">> Output bundle dir: ${BUNDLE_DIR}"

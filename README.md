@@ -48,12 +48,16 @@ each target must be built on a matching OS/arch. `build.sh` refuses a mismatched
 build (override with `ALLOW_CROSS=1` only if you know the wheels are compatible). CI builds
 every target on a matching runner.
 
-Output: `ansible-portable-<ansible_version>-<os>-<arch>.tar.gz` (+ `.sha256`).
+Output: `ansible-portable-<bundle_version>-<os>-<arch>.tar.gz` (+ `.sha256`). The tarball is
+named by the **bundle release version** (our own versioning), not by the ansible-core version,
+so the bundle can be rebuilt (e.g. changing a collection) at the same ansible-core version by
+bumping the release. `BUNDLE_VERSION` comes from the env (CI = git tag); locally it falls back
+to `git describe`.
 
 ## Test
 
 ```sh
-./smoke-test.sh ansible-portable-2.21.0-darwin-arm64.tar.gz
+./smoke-test.sh ansible-portable-v0.2.0-darwin-arm64.tar.gz
 ```
 
 It extracts the tarball into a fresh temp dir (proving relocatability), strips system
