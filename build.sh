@@ -119,8 +119,11 @@ ${PYRUN[@]+"${PYRUN[@]}"} "$PY" "${BUNDLE_DIR}/python/bin/ansible-galaxy" collec
 # ----- package ----------------------------------------------------------------
 # Pipe through `gzip -9` (max compression) instead of `tar -z` (level 6). Portable across
 # macOS bsdtar and GNU tar.
-echo ">> Creating ${TARBALL} (gzip -9)"
-tar -cf - -C "$BUNDLE_DIR" . | gzip -9 > "$TARBALL"
+# -h/--dereference resolves symlinks into real files: consumers that extract the tarball
+# without preserving symlinks (e.g. furyctl's go-getter/cache copy) would otherwise turn the
+# python interpreter symlinks (python3 -> python3.12, ...) into empty files and break it.
+echo ">> Creating ${TARBALL} (gzip -9, dereferencing symlinks)"
+tar -ch -f - -C "$BUNDLE_DIR" . | gzip -9 > "$TARBALL"
 
 echo ">> Computing checksum"
 if command -v sha256sum >/dev/null 2>&1; then
