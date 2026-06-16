@@ -1,74 +1,73 @@
-# ansible-portable-poc
+# ansible-portable
 
-PoC: package Ansible as a **self-contained, relocatable bundle** with **zero host
-dependencies** (no system Python, no container runtime), so a tool like `furyctl` can
-download and run a pinned Ansible exactly like it downloads `terraform`/`kubectl`.
+A **recipe** to package Ansible as a single, self-contained, relocatable tarball with
+**zero host dependencies** — no system Python, no `pip`, no container runtime. A consumer
+(e.g. `furyctl`) downloads the tarball, extracts it, and runs Ansible from it exactly like
+it would download `kubectl` or `terraform`.
 
-A bundle = a relocatable [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
-CPython with `ansible-core` pip-installed directly into its tree (no venv, so there are no
-absolute paths in `pyvenv.cfg`) plus the Galaxy collections from `requirements.yml` baked
-in. The only residual host dependency is the `ssh` client, used by Ansible's default
-connection plugin (universally present on Linux/macOS control nodes).
+The only thing the host still needs is an `ssh` client (Ansible's default connection),
+which is present everywhere on Linux/macOS control nodes.
 
-This is **Fase 0** of the design at
-`../research/docs/proposal/ansible-self-contained-bundle.md`.
-
-## Layout
+## What's in a bundle
 
 ```
-versions.env              # version pins (CPython, pbs release, ansible-core)
-requirements.yml          # pinned Galaxy collections (ansible.posix)
-build.sh                  # build one bundle: ./build.sh <os> <arch>
-smoke-test.sh             # relocate a bundle and verify self-containment
-test/                     # minimal localhost play used by the smoke test
-.github/workflows/build.yml
-```
-
-A built bundle (and its tarball) contains:
-
-```
-python/                   # relocatable CPython + ansible-core in site-packages
-  bin/python3
+python/          relocatable CPython (from astral-sh/python-build-standalone)
+  bin/python3        + ansible-core installed straight into its site-packages (no venv)
   bin/ansible
   bin/ansible-playbook
   bin/ansible-galaxy
-collections/              # baked Galaxy collections (ansible.posix, ...)
-  ansible_collections/...
+collections/     Galaxy collections baked in (ansible.posix, community.general)
 ```
 
-## Build locally
+## The recipe (how the build works)
+
+`build.sh <os> <arch>` does, for one target:
+
+1. **Download a relocatable CPython** — the `install_only` build from
+   [python-build-standalone](https://github.com/astral-sh/python-build-standalone),
+   extracted to `python/`.
+2. **Install ansible-core into that interpreter's tree** (not a venv → no absolute paths in
+   `pyvenv.cfg`, so the tree can be moved anywhere):
+   `python/bin/python3 -m pip install --only-binary=:all: -c constraints.txt ansible-core==<pin>`.
+   - `--only-binary=:all:` forbids source builds: a missing wheel fails loudly instead of
+     silently compiling (which would need a toolchain and break reproducibility).
+   - `constraints.txt` pins native deps to versions that ship wheels on every target
+     (e.g. `cryptography`, whose newest releases dropped macOS x86_64 wheels).
+3. **Bake the Galaxy collections** from `requirements.yml` into `collections/`.
+4. **Package** with `tar | gzip -9` → `ansible-portable-<bundle_version>-<os>-<arch>.tar.gz`
+   (+ `.sha256`).
+
+Two build details worth knowing:
+
+- **Each target builds on a matching machine.** `pip` resolves native wheels for the host,
+  so `build.sh` refuses a mismatched local build. CI uses native runners — except
+  `darwin/amd64`, which is cross-built on an Apple-silicon runner via **Rosetta 2**
+  (`arch -x86_64`), avoiding the scarce Intel runners.
+- **Versioning is decoupled.** The tarball is named by **our own bundle release version**
+  (the git tag, via `BUNDLE_VERSION` / `github.ref_name`), *not* by the ansible-core version.
+  This lets us rebuild the bundle (e.g. add a collection) at the same ansible-core version by
+  bumping the release. The ansible-core version lives in `versions.env` and only drives what
+  gets installed.
+
+CI (`.github/workflows/build.yml`) runs this for all four targets
+(`linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`), smoke-tests each, uploads
+workflow artifacts, and on a `v*` tag publishes a GitHub Release with the four tarballs +
+`SHA256SUMS`.
+
+## How to use a bundle
+
+Download and extract anywhere:
 
 ```sh
-./build.sh                # builds for the host os/arch
-./build.sh darwin arm64   # explicit target (must match the host machine)
+BUNDLE=/opt/ansible-portable
+mkdir -p "$BUNDLE"
+curl -fsSL https://github.com/nutellinoit/ansible-portable-poc/releases/download/v0.2.0/ansible-portable-v0.2.0-linux-amd64.tar.gz \
+  | tar -xz -C "$BUNDLE"
 ```
 
-`pip` resolves native wheels (PyYAML, cryptography, ...) for the **machine it runs on**, so
-each target must be built on a matching OS/arch. `build.sh` refuses a mismatched local
-build (override with `ALLOW_CROSS=1` only if you know the wheels are compatible). CI builds
-every target on a matching runner.
-
-Output: `ansible-portable-<bundle_version>-<os>-<arch>.tar.gz` (+ `.sha256`). The tarball is
-named by the **bundle release version** (our own versioning), not by the ansible-core version,
-so the bundle can be rebuilt (e.g. changing a collection) at the same ansible-core version by
-bumping the release. `BUNDLE_VERSION` comes from the env (CI = git tag); locally it falls back
-to `git describe`.
-
-## Test
-
-```sh
-./smoke-test.sh ansible-portable-v0.2.0-darwin-arm64.tar.gz
-```
-
-It extracts the tarball into a fresh temp dir (proving relocatability), strips system
-python/ansible from `PATH`, and asserts: `ansible-playbook --version` runs, `ansible.posix`
-resolves, and a localhost play executes on the bundle's interpreter.
-
-## Running a relocated bundle (the shebang note)
-
-The `bin/ansible-playbook` console script keeps the shebang from build time, which is wrong
-after relocation. **Always invoke it through the bundle's Python**, passing the script as an
-argument, and point Ansible at the baked collections:
+Run it — **always invoke the console script through the bundle's Python** (the script's
+shebang points at the build-time path and is wrong after relocation), and point Ansible at
+the baked collections:
 
 ```sh
 ANSIBLE_COLLECTIONS_PATH="$BUNDLE/collections" \
@@ -76,20 +75,35 @@ ANSIBLE_COLLECTIONS_PATH="$BUNDLE/collections" \
   -i inventory.ini playbook.yml
 ```
 
-This is exactly how `furyctl`'s Ansible runner will invoke the bundle once integrated.
+No system Python or Ansible is involved. This is exactly how `furyctl` invokes the bundle
+once integrated (it sets the paths + env from Go and runs the playbooks as usual).
 
-## CI
+## Build & test locally
 
-`.github/workflows/build.yml` builds all four targets — `linux/amd64` (`ubuntu-latest`),
-`linux/arm64` (`ubuntu-24.04-arm`), `darwin/arm64` (`macos-14`), `darwin/amd64`
-(`macos-13`) — runs the smoke test on each, and uploads the tarballs as workflow
-artifacts. Pushing a tag `v*` also attaches all tarballs + an aggregated `SHA256SUMS` to a
-GitHub Release.
+```sh
+./build.sh                 # builds for the host os/arch
+BUNDLE_VERSION=v0.2.0 ./build.sh darwin arm64    # explicit version + target (must match host)
+./smoke-test.sh ansible-portable-v0.2.0-darwin-arm64.tar.gz
+```
 
-> Note: `ubuntu-24.04-arm` is free on public repos; on private repos it consumes minutes.
-> If unavailable, build `linux/arm64` via QEMU on `ubuntu-latest` (slower, wheel-download only).
+`smoke-test.sh` extracts the tarball into a fresh temp dir (proving relocatability), strips
+system python/ansible from `PATH`, and checks: `ansible-playbook --version` runs, the baked
+collections resolve, and a localhost play executes on the bundle's interpreter.
 
-## Version pins
+## Files
 
-See `versions.env` and `requirements.yml`. Current: CPython 3.12.13 (pbs `20260610`),
-`ansible-core` 2.21.0, `ansible.posix` 2.2.0.
+| File | Role |
+|------|------|
+| `build.sh` | builds one bundle for a target |
+| `smoke-test.sh` | relocates a bundle and verifies self-containment |
+| `versions.env` | pins: CPython / pbs release / ansible-core |
+| `requirements.yml` | Galaxy collections baked into the bundle |
+| `constraints.txt` | pip constraints (native deps with wheels everywhere) |
+| `test/` | minimal localhost play for the smoke test |
+| `.github/workflows/build.yml` | multi-arch build + release |
+
+## Pins
+
+See `versions.env` / `requirements.yml` / `constraints.txt`. Current: CPython 3.12.13
+(pbs `20260610`), `ansible-core` 2.21.0, `ansible.posix` 2.2.0, `community.general` 13.0.1,
+`cryptography` 48.0.1.
