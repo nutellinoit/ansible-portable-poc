@@ -1,0 +1,25 @@
+name: Lint
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  shell:
+    name: shellcheck + shfmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+
+      - name: shellcheck
+        run: mise run lint
+
+      - name: shfmt (check)
+        run: mise run fmt-check

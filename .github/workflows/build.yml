@@ -35,19 +35,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install mise
+        uses: jdx/mise-action@v2
+
       - name: Build bundle
         env:
           # Name the tarball by the release version (the git tag on tag builds, else the
           # branch name for manual dispatch).
           BUNDLE_VERSION: ${{ github.ref_name }}
-        run: ./build.sh ${{ matrix.os }} ${{ matrix.arch }}
+        run: mise run build -- ${{ matrix.os }} ${{ matrix.arch }}
 
       - name: Locate tarball
         id: tarball
         run: echo "name=$(ls ansible-portable-*-${{ matrix.os }}-${{ matrix.arch }}.tar.gz)" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test (relocated)
-        run: ./smoke-test.sh "${{ steps.tarball.outputs.name }}"
+        run: mise run test -- "${{ steps.tarball.outputs.name }}"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4

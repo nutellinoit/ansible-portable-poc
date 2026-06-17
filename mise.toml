@@ -1,0 +1,67 @@
+# mise is the task-runner + tool-manager for this repo (like the other SIGHUP projects).
+# Run `mise tasks` to list everything. Build/test/lint/checksums all go through `mise run …`.
+
+[tools]
+node = "22"        # for the Marp presentation tasks (npx)
+shellcheck = "0.10.0"
+shfmt = "3.10.0"
+gh = "2.65.0"      # build.sh provenance attestation + `mise run checksums <tag>`
+
+# --- Build & package ---------------------------------------------------------
+
+[tasks.build]
+description = "Build a bundle for the host os/arch (override: mise run build -- linux amd64)"
+run = "./scripts/build.sh"
+
+[tasks.test]
+description = "Smoke-test a built tarball after relocation (mise run test -- <tarball>)"
+run = "./scripts/smoke-test.sh"
+
+[tasks.verify]
+description = "Build the host bundle and smoke-test it (local packaging test)"
+depends = ["build"]
+run = './scripts/smoke-test.sh "$(ls -t ansible-portable-*.tar.gz | head -1)"'
+
+[tasks.checksums]
+description = "Emit the kfd.yaml checksums block (local tarballs, or: mise run checksums -- <tag>)"
+run = "./scripts/checksums.sh"
+
+[tasks.clean]
+description = "Remove build outputs (dist/ and tarballs)"
+run = "rm -rf dist ansible-portable-*.tar.gz ansible-portable-*.tar.gz.sha256"
+
+# --- Lint & format -----------------------------------------------------------
+
+[tasks.lint]
+description = "shellcheck all shell scripts"
+run = "shellcheck scripts/*.sh scripts/lib/*.sh"
+
+[tasks.fmt]
+description = "Format shell scripts with shfmt"
+run = "shfmt -w scripts"
+
+[tasks.fmt-check]
+description = "Check shell formatting without writing (CI)"
+run = "shfmt -d scripts"
+
+# --- Presentation (Marp) -----------------------------------------------------
+# The portable-Ansible deck lives in docs/presentations/. embed.mjs inlines the remote logo /
+# hero as data URIs so the built HTML/PDF is fully self-contained. All tools run via npx.
+
+[tasks.presentation]
+description = "Serve the portable-Ansible slides (Marp) with live reload on :8090"
+run = "PORT=8090 npx @marp-team/marp-cli@latest --server docs/presentations"
+
+[tasks.presentation-build]
+description = "Build a SELF-CONTAINED HTML + PDF (remote images embedded as data URIs)"
+run = """
+  cd "{{config_root}}"
+  node docs/presentations/embed.mjs
+  npx @marp-team/marp-cli@latest -c docs/presentations/marp.config.mjs docs/presentations/.ansible-portable.embedded.md -o docs/presentations/ansible-portable.html
+  npx @marp-team/marp-cli@latest -c docs/presentations/marp.config.mjs docs/presentations/.ansible-portable.embedded.md -o docs/presentations/ansible-portable.pdf --pdf
+  rm -f docs/presentations/.ansible-portable.embedded.md
+"""
+
+[tasks.presentation-install]
+description = "Install marp-cli globally (optional; the tasks above use npx)"
+run = "npm install -g @marp-team/marp-cli"
