@@ -72,7 +72,10 @@ case "${OS}/${ARCH}" in
 esac
 
 PBS_ASSET="cpython-${PYTHON_VERSION}+${PBS_RELEASE}-${TRIPLE}-install_only.tar.gz"
-PBS_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/${PBS_ASSET}"
+PBS_BASE_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}"
+PBS_URL="${PBS_BASE_URL}/${PBS_ASSET}"
+# python-build-standalone publishes a single aggregated SHA256SUMS per release (no per-asset .sha256).
+PBS_SHA256SUMS_URL="${PBS_BASE_URL}/SHA256SUMS"
 
 # Release version of the bundle (our own versioning), used for the tarball name.
 # Precedence: env BUNDLE_VERSION (CI sets it to github.ref_name) -> git describe -> "dev".
@@ -94,6 +97,37 @@ mkdir -p "$BUNDLE_DIR"
 
 echo ">> Downloading ${PBS_URL}"
 curl -fL --retry 3 -o "${BUNDLE_DIR}/python.tar.gz" "$PBS_URL"
+
+# Verify the upstream CPython against python-build-standalone's published SHA256SUMS BEFORE
+# extracting it: a tampered/MITM'd interpreter must never be unpacked into the bundle.
+echo ">> Verifying CPython checksum against upstream SHA256SUMS"
+expected_sha="$(curl -fsL --retry 3 "$PBS_SHA256SUMS_URL" | awk -v f="$PBS_ASSET" '$2 == f {print $1}')"
+if [ -z "$expected_sha" ]; then
+  echo "ERROR: ${PBS_ASSET} not found in upstream SHA256SUMS (${PBS_SHA256SUMS_URL})" >&2
+  exit 1
+fi
+if command -v sha256sum >/dev/null 2>&1; then
+  actual_sha="$(sha256sum "${BUNDLE_DIR}/python.tar.gz" | awk '{print $1}')"
+else
+  actual_sha="$(shasum -a 256 "${BUNDLE_DIR}/python.tar.gz" | awk '{print $1}')"
+fi
+if [ "$expected_sha" != "$actual_sha" ]; then
+  echo "ERROR: CPython checksum mismatch for ${PBS_ASSET}" >&2
+  echo "       expected ${expected_sha}" >&2
+  echo "       actual   ${actual_sha}" >&2
+  exit 1
+fi
+echo ">> CPython checksum OK (${actual_sha})"
+
+# Best-effort provenance check: python-build-standalone publishes GitHub Artifact Attestations
+# (Sigstore). Verify them when the gh CLI is available; never fail the build if it isn't.
+if command -v gh >/dev/null 2>&1; then
+  echo ">> Verifying CPython provenance attestation (gh)"
+  if ! gh attestation verify "${BUNDLE_DIR}/python.tar.gz" --repo astral-sh/python-build-standalone; then
+    echo ">> WARN: attestation verification skipped/failed (non-fatal)" >&2
+  fi
+fi
+
 echo ">> Extracting CPython"
 tar -xzf "${BUNDLE_DIR}/python.tar.gz" -C "$BUNDLE_DIR"   # extracts to ${BUNDLE_DIR}/python/
 rm -f "${BUNDLE_DIR}/python.tar.gz"
