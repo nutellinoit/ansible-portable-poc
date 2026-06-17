@@ -80,9 +80,39 @@ jobs:
           echo "=== SHA256SUMS ==="
           cat SHA256SUMS
 
+      - name: Generate release notes (with kfd.yaml snippet)
+        working-directory: artifacts
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          {
+            echo "Self-contained, relocatable Ansible bundle (CPython + ansible-core + collections)."
+            echo "Download a tarball and run \`python3 <bundle>/python/bin/ansible-playbook ...\` — no host Ansible required."
+            echo
+            echo "## Pin in the distribution \`kfd.yaml\` (under \`tools.common.ansible\`)"
+            echo
+            echo '```yaml'
+            echo "    ansible:"
+            echo "      version: ${TAG}"
+            echo "      checksums:"
+            while read -r hash file; do
+              case "$file" in
+                ansible-portable-*.tar.gz)
+                  base="${file%.tar.gz}"; arch="${base##*-}"; rest="${base%-*}"; os="${rest##*-}"
+                  printf '        %s: "%s"\n' "${os}-${arch}" "$hash"
+                  ;;
+              esac
+            done < SHA256SUMS | sort
+            echo '```'
+            echo
+            echo "furyctl verifies each downloaded bundle against the pinned per-arch SHA-256."
+          } > RELEASE_NOTES.md
+          echo "=== RELEASE_NOTES.md ===" && cat RELEASE_NOTES.md
+
       - name: Create / update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: artifacts/RELEASE_NOTES.md
           files: |
             artifacts/*.tar.gz
             artifacts/SHA256SUMS
